@@ -31,6 +31,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <thread>
@@ -187,27 +188,28 @@ int TextMenu::DrawItems(int x, int y, int screen_width, bool long_press) const {
   int offset = 0;
   int padding = draw_funcs_.MenuItemPadding();
 
-  draw_funcs_.SetColor(UIElement::MENU);
-  offset += draw_funcs_.DrawHorizontalRule(y + offset) + 4;
+  // Lead-in matches the old horizontal rule so touch hit-testing stays aligned.
+  offset += 12;
 
   int item_container_offset = offset; // store it for drawing scrollbar on most top
 
+  const int bar_x = padding;
+  const int bar_width = std::max(0, screen_width - padding * 2);
+  const int text_x = std::max(x, bar_x + padding / 2);
+
   for (size_t i = MenuStart(); i < MenuEnd(); ++i) {
-    if (i == selection()) {
-      // Draw the highlight bar.
-      draw_funcs_.SetColor(long_press ? UIElement::MENU_SEL_BG_ACTIVE : UIElement::MENU_SEL_BG);
+    const bool selected = i == static_cast<size_t>(selection());
+    draw_funcs_.SetColor(selected ? (long_press ? UIElement::MENU_SEL_BG_ACTIVE
+                                                : UIElement::MENU_SEL_BG)
+                                  : UIElement::MENU_BG);
 
-      int bar_height = padding + char_height_ + padding;
-      draw_funcs_.DrawHighlightBar(0, y + offset, screen_width, bar_height);
+    int bar_height = padding + char_height_ + padding;
+    draw_funcs_.DrawHighlightBar(bar_x, y + offset, bar_width, bar_height,
+                                 i == MenuStart(), i + 1 == MenuEnd());
 
-      // Colored text for the selected item.
-      draw_funcs_.SetColor(UIElement::MENU_SEL_FG);
-    }
-    offset += draw_funcs_.DrawTextLine(x, y + offset, TextItem(i), false /* bold */);
-
-    draw_funcs_.SetColor(UIElement::MENU);
+    draw_funcs_.SetColor(selected ? UIElement::MENU_SEL_FG : UIElement::MENU);
+    offset += draw_funcs_.DrawTextLine(text_x, y + offset, TextItem(i), false /* bold */);
   }
-  offset += draw_funcs_.DrawHorizontalRule(y + offset);
 
   std::string unused;
   if (ItemsOverflow(&unused)) {
@@ -259,27 +261,29 @@ int GraphicMenu::DrawHeader(int x, int y) const {
 
 int GraphicMenu::DrawItems(int x, int y, int screen_width, bool long_press) const {
   int offset = 0;
+  int padding = draw_funcs_.MenuItemPadding();
 
-  draw_funcs_.SetColor(UIElement::MENU);
-  offset += draw_funcs_.DrawHorizontalRule(y + offset) + 4;
+  offset += 12;
 
-  for (size_t i = 0; i < graphic_items_.size(); i++) {
+  const int bar_x = padding;
+  const int bar_width = std::max(0, screen_width - padding * 2);
+  const int text_x = std::max(x, bar_x + padding / 2);
+  const size_t count = graphic_items_.size();
+
+  for (size_t i = 0; i < count; i++) {
     auto& item = graphic_items_[i];
-    if (i == selection_) {
-      draw_funcs_.SetColor(long_press ? UIElement::MENU_SEL_BG_ACTIVE : UIElement::MENU_SEL_BG);
+    const bool selected = i == static_cast<size_t>(selection_);
+    draw_funcs_.SetColor(selected ? (long_press ? UIElement::MENU_SEL_BG_ACTIVE
+                                                : UIElement::MENU_SEL_BG)
+                                  : UIElement::MENU_BG);
 
-      int bar_height = item->height + 4;
-      draw_funcs_.DrawHighlightBar(0, y + offset - 2, screen_width, bar_height);
+    draw_funcs_.DrawHighlightBar(bar_x, y + offset, bar_width, item->height, i == 0,
+                                 i + 1 == count);
 
-      // Bold white text for the selected item.
-      draw_funcs_.SetColor(UIElement::MENU_SEL_FG);
-    }
-    draw_funcs_.DrawTextIcon(x, y + offset, item.get());
+    draw_funcs_.SetColor(selected ? UIElement::MENU_SEL_FG : UIElement::MENU);
+    draw_funcs_.DrawTextIcon(text_x, y + offset, item.get());
     offset += item->height;
-
-    draw_funcs_.SetColor(UIElement::MENU);
   }
-  offset += draw_funcs_.DrawHorizontalRule(y + offset);
 
   return offset;
 }
@@ -595,6 +599,9 @@ void ScreenRecoveryUI::SetColor(UIElement e) const {
     case UIElement::SCROLLBAR:
       gr_color(255, 255, 255, 255);
       break;
+    case UIElement::MENU_BG:
+      gr_color(255, 255, 255, 40);
+      break;
     case UIElement::MENU_SEL_BG_ACTIVE:
       gr_color(204, 204, 204, 255);
       break;
@@ -714,9 +721,34 @@ int ScreenRecoveryUI::DrawHorizontalRule(int y) const {
 }
 
 void ScreenRecoveryUI::DrawHighlightBar(int x, int y, int width, int height) const {
-  if (y + height > ScreenHeight())
-    height = ScreenHeight() - y;
-  gr_fill(x, y, x + width, y + height);
+  DrawHighlightBar(x, y, width, height, true, true);
+}
+
+void ScreenRecoveryUI::DrawHighlightBar(int x, int y, int width, int height, bool round_top,
+                                        bool round_bottom) const {
+  const int left = std::max(0, x);
+  const int top = std::max(0, y);
+  const int right = std::min(ScreenWidth(), x + width);
+  const int bottom = std::min(ScreenHeight(), y + height);
+  if (right <= left || bottom <= top || width <= 0 || height <= 0) return;
+
+  const int radius = std::min(PixelsFromDp(12), std::min(width, height) / 2);
+  for (int row = top; row < bottom; ++row) {
+    const int relative_y = row - y;
+    int inset = 0;
+    if (radius > 0 && round_top && relative_y < radius) {
+      const double dy = radius - relative_y - 0.5;
+      const double inside = static_cast<double>(radius) * radius - dy * dy;
+      inset = inside > 0 ? radius - static_cast<int>(std::sqrt(inside)) : radius;
+    } else if (radius > 0 && round_bottom && relative_y >= height - radius) {
+      const double dy = relative_y - (height - radius) + 0.5;
+      const double inside = static_cast<double>(radius) * radius - dy * dy;
+      inset = inside > 0 ? radius - static_cast<int>(std::sqrt(inside)) : radius;
+    }
+    const int row_left = std::max(left, x + inset);
+    const int row_right = std::min(right, x + width - inset);
+    if (row_right > row_left) gr_fill(row_left, row, row_right, row + 1);
+  }
 }
 
 void ScreenRecoveryUI::DrawScrollBar(int y, int height) const {

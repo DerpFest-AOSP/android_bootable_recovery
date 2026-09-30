@@ -35,6 +35,7 @@ enum class UIElement {
   BATTERY_LOW,
   HEADER,
   MENU,
+  MENU_BG,
   MENU_SEL_BG,
   MENU_SEL_BG_ACTIVE,
   MENU_SEL_FG,
@@ -54,6 +55,14 @@ class DrawInterface {
 
   // Draws a highlight bar at (x, y) - (x + width, y + height).
   virtual void DrawHighlightBar(int x, int y, int width, int height) const = 0;
+
+  // Same bar, optionally rounding the top and/or bottom so adjacent rows read as one group.
+  virtual void DrawHighlightBar(int x, int y, int width, int height, bool round_top,
+                                bool round_bottom) const {
+    DrawHighlightBar(x, y, width, height);
+    (void)round_top;
+    (void)round_bottom;
+  }
 
   // Draws a horizontal rule at Y. Returns the offset it should be moving along Y-axis.
   virtual int DrawHorizontalRule(int y) const = 0;
@@ -245,6 +254,10 @@ class MenuDrawFunctions : public DrawInterface {
   void DrawHighlightBar(int x, int y, int width, int height) const override {
     wrappee_.DrawHighlightBar(x, y, width, height);
   };
+  void DrawHighlightBar(int x, int y, int width, int height, bool round_top,
+                        bool round_bottom) const override {
+    wrappee_.DrawHighlightBar(x, y, width, height, round_top, round_bottom);
+  }
   void DrawScrollBar(int y, int height) const override {
     wrappee_.DrawScrollBar(y, height);
   }
@@ -429,6 +442,8 @@ class ScreenRecoveryUI : public RecoveryUI, public DrawInterface {
   // Implementation of the draw functions in DrawInterface.
   void SetColor(UIElement e) const override;
   void DrawHighlightBar(int x, int y, int width, int height) const override;
+  void DrawHighlightBar(int x, int y, int width, int height, bool round_top,
+                        bool round_bottom) const override;
   void DrawScrollBar(int y, int height) const override;
   int DrawHorizontalRule(int y) const override;
   void DrawSurface(const GRSurface* surface, int sx, int sy, int w, int h, int dx,

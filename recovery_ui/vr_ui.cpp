@@ -66,6 +66,11 @@ void VrRecoveryUI::DrawHighlightBar(int /* x */, int y, int /* width */, int hei
           gr_fb_width() - margin_width_ - stereo_offset_, y + height);
 }
 
+void VrRecoveryUI::DrawHighlightBar(int x, int y, int width, int height, bool /* round_top */,
+                                    bool /* round_bottom */) const {
+  DrawHighlightBar(x, y, width, height);
+}
+
 void VrRecoveryUI::DrawFill(int x, int y, int w, int h) const {
   gr_fill(x + stereo_offset_, y, w, h);
   gr_fill(x - stereo_offset_ + ScreenWidth(), y, w, h);
