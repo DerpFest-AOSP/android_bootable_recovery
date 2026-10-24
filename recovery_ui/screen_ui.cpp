@@ -79,8 +79,10 @@ TextMenu::TextMenu(bool wrappable, size_t max_length,
     : Menu(initial_selection, draw_funcs),
       wrappable_(wrappable),
       calibrated_height_(false),
+      max_display_items_(items.size()),
       max_item_length_(max_length),
       text_headers_(headers),
+      menu_start_(0),
       char_height_(char_height) {
 
   size_t items_count = items.size();
@@ -196,6 +198,8 @@ int TextMenu::DrawItems(int x, int y, int screen_width, bool long_press) const {
   const int bar_x = padding;
   const int bar_width = std::max(0, screen_width - padding * 2);
   const int text_x = std::max(x, bar_x + padding / 2);
+  // Bar, row step, and scrollbar share this height. It matches MenuItemHeight().
+  const int item_height = padding + char_height_ + padding;
 
   for (size_t i = MenuStart(); i < MenuEnd(); ++i) {
     const bool selected = i == static_cast<size_t>(selection());
@@ -203,19 +207,21 @@ int TextMenu::DrawItems(int x, int y, int screen_width, bool long_press) const {
                                                 : UIElement::MENU_SEL_BG)
                                   : UIElement::MENU_BG);
 
-    int bar_height = padding + char_height_ + padding;
-    draw_funcs_.DrawHighlightBar(bar_x, y + offset, bar_width, bar_height,
+    draw_funcs_.DrawHighlightBar(bar_x, y + offset, bar_width, item_height,
                                  i == MenuStart(), i + 1 == MenuEnd());
 
     draw_funcs_.SetColor(selected ? UIElement::MENU_SEL_FG : UIElement::MENU);
-    offset += draw_funcs_.DrawTextLine(text_x, y + offset, TextItem(i), false /* bold */);
+    draw_funcs_.DrawTextLine(text_x, y + offset, TextItem(i), false /* bold */);
+    offset += item_height;
   }
 
   std::string unused;
   if (ItemsOverflow(&unused)) {
-    int container_height = max_display_items_ * (2 * padding + char_height_);
-    int bar_height = container_height / (text_items_.size() - max_display_items_ + 1);
-    int start_y = y + item_container_offset + bar_height * menu_start_;
+    const int visible = static_cast<int>(max_display_items_);
+    const int container_height = visible * item_height;
+    const int steps = static_cast<int>(ItemsCount() - max_display_items_) + 1;
+    const int bar_height = std::max(1, container_height / steps);
+    const int start_y = y + item_container_offset + bar_height * static_cast<int>(menu_start_);
     draw_funcs_.SetColor(UIElement::SCROLLBAR);
     draw_funcs_.DrawScrollBar(start_y, bar_height);
   }
@@ -710,6 +716,13 @@ int ScreenRecoveryUI::ScreenHeight() const {
   return gr_fb_height();
 }
 
+int ScreenRecoveryUI::MenuContentWidth() const {
+  const int padding = MenuItemPadding();
+  const int card_right = ScreenWidth() - padding;
+  const int text_x = std::max(margin_width_ + kMenuIndent, padding + padding / 2);
+  return std::max(0, card_right - text_x);
+}
+
 void ScreenRecoveryUI::DrawSurface(const GRSurface* surface, int sx, int sy, int w, int h, int dx,
                                    int dy) const {
   gr_blit(surface, sx, sy, w, h, dx, dy);
@@ -726,10 +739,19 @@ void ScreenRecoveryUI::DrawHighlightBar(int x, int y, int width, int height) con
 
 void ScreenRecoveryUI::DrawHighlightBar(int x, int y, int width, int height, bool round_top,
                                         bool round_bottom) const {
+  DrawRoundedRect(x, y, width, height, round_top, round_bottom);
+}
+
+void ScreenRecoveryUI::DrawRoundedRect(int x, int y, int width, int height, bool round_top,
+                                       bool round_bottom) const {
+  // Clip to the framebuffer. minui drops a fill that extends past it, and a stereo UI draws the
+  // second eye outside ScreenWidth().
+  const int fb_width = gr_fb_width();
+  const int fb_height = gr_fb_height();
   const int left = std::max(0, x);
   const int top = std::max(0, y);
-  const int right = std::min(ScreenWidth(), x + width);
-  const int bottom = std::min(ScreenHeight(), y + height);
+  const int right = std::min(fb_width, x + width);
+  const int bottom = std::min(fb_height, y + height);
   if (right <= left || bottom <= top || width <= 0 || height <= 0) return;
 
   const int radius = std::min(PixelsFromDp(12), std::min(width, height) / 2);
@@ -871,7 +893,13 @@ void ScreenRecoveryUI::draw_menu_and_text_buffer_locked(
     }
     y += menu_->DrawHeader(x, y);
     menu_start_y_ = y + 12; // Skip horizontal rule and some margin
-    menu_->SetMenuHeight(std::max(0, ScreenHeight() - menu_start_y_));
+    // Leave the bottom margin and the help text, so a long menu cannot push them off-screen.
+    // DrawTextLine() advances char_height_ + 4 per help line.
+    int reserved = margin_height_;
+    if (!help_message.empty()) {
+      reserved += MenuItemPadding() + static_cast<int>(help_message.size()) * (char_height_ + 4);
+    }
+    menu_->SetMenuHeight(std::max(0, ScreenHeight() - menu_start_y_ - reserved));
     y += menu_->DrawItems(x, y, ScreenWidth(), IsLongPress());
     if (!help_message.empty()) {
       y += MenuItemPadding();
@@ -1473,8 +1501,8 @@ std::unique_ptr<Menu> ScreenRecoveryUI::CreateMenu(
     const GRSurface* graphic_header, const std::vector<const GRSurface*>& graphic_items,
     const std::vector<std::string>& text_headers, const std::vector<std::string>& text_items,
     size_t initial_selection) const {
-  // horizontal unusable area: margin width + menu indent
-  size_t max_width = ScreenWidth() - margin_width_ - kMenuIndent;
+  // Graphic rows are drawn inside the card, so validate against that width.
+  size_t max_width = static_cast<size_t>(MenuContentWidth());
   // vertical unusable area: margin height + title lines + helper message + high light bar.
   // It is safe to reserve more space.
   size_t max_height = ScreenHeight() - margin_height_ - char_height_ * (title_lines_.size() + 3);
@@ -1492,7 +1520,7 @@ std::unique_ptr<Menu> ScreenRecoveryUI::CreateMenu(const std::vector<std::string
                                                    size_t initial_selection) const {
   int menu_char_width = MenuCharWidth();
   int menu_char_height = MenuCharHeight();
-  int menu_cols = (ScreenWidth() - margin_width_*2 - kMenuIndent) / menu_char_width;
+  int menu_cols = std::max(1, MenuContentWidth() / menu_char_width);
   bool wrap_selection = !HasThreeButtons() && !HasTouchScreen();
   return std::make_unique<TextMenu>(wrap_selection, menu_cols, text_headers, text_items,
                                     initial_selection, menu_char_height, *menu_draw_funcs_);

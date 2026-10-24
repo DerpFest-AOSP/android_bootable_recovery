@@ -19,6 +19,7 @@
 
 #include <stdio.h>
 
+#include <algorithm>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -176,11 +177,13 @@ class TextMenu : public Menu {
   // |cur_selection_str| if the items exceed the screen limit.
   bool ItemsOverflow(std::string* cur_selection_str) const;
 
-  // The number of displayable items is only known after we started drawing the menu (to consider logo, header, etc.)
-  // Make it settable after the menu is created
-  void SetMenuHeight(int height) {
+  // The number of displayable items is only known after we started drawing the menu (to consider
+  // logo, header, etc.). Make it settable after the menu is created.
+  void SetMenuHeight(int height) override {
     if (!calibrated_height_) {
-      max_display_items_ = height / draw_funcs_.MenuItemHeight();
+      const int item_extent = std::max(1, draw_funcs_.MenuItemHeight());
+      max_display_items_ =
+          static_cast<size_t>(std::max(1, std::max(0, height) / item_extent));
       menu_start_ = std::max(0, (int)selection_ - (int)max_display_items_ + 1);
       calibrated_height_ = true;
     }
@@ -438,6 +441,14 @@ class ScreenRecoveryUI : public RecoveryUI, public DrawInterface {
   virtual int ScreenWidth() const;
   // Returns pixel height of draw buffer.
   virtual int ScreenHeight() const;
+
+  // Width of the text inside a menu card. Labels are clipped to this, not the screen.
+  int MenuContentWidth() const;
+
+  // Fills a rectangle, rounding the top and/or bottom corners. Virtual so a stereo UI can draw
+  // the same card once per eye.
+  virtual void DrawRoundedRect(int x, int y, int width, int height, bool round_top,
+                               bool round_bottom) const;
 
   // Implementation of the draw functions in DrawInterface.
   void SetColor(UIElement e) const override;
