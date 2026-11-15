@@ -33,7 +33,10 @@
 class GRSurface;
 
 enum class UIElement {
+  BATTERY_CRITICAL,
   BATTERY_LOW,
+  BATTERY_MEDIUM,
+  BATTERY_HIGH,
   HEADER,
   MENU,
   MENU_BG,
